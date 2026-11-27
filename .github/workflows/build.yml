@@ -212,6 +212,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      # 正文里的「上一个版本」和「变更」要靠完整 tag 历史 + git log，
+      # 浅克隆拿不到，所以这里必须 fetch-depth: 0。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -226,8 +233,18 @@ jobs:
           sha256sum *.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # 正文写成文件交给 action（body_path）。不要只留 generate_release_notes：
+      # 那种情况 GitHub 只用自动生成的「What's Changed」，tag 附注里的说明会整段消失。
+      - name: 生成 Release 正文
+        env:
+          TAG: ${{ github.ref_name }}
+          TRIGGER: 推送 tag ${{ github.ref_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/make-release-notes.sh > release-body.md && cat release-body.md
+
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: release-body.md
           files: |
             artifacts/*.zip
             artifacts/SHA256SUMS.txt
