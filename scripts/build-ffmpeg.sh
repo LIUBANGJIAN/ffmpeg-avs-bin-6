@@ -160,9 +160,13 @@ build_ffmpeg() {
   # 在 Actions 里正好命中本项目仓库的 .git，于是产物版本串变成我们的 commit sha
   # （实测 `ffmpeg version daff97d`，完全看不出是 6.1.6）。
   #
-  # version.sh 里 `version=$(cat VERSION)` 的优先级高于 revision，写一个就压住它。
-  # 9.0.2 仓库早就有这个修复，这里补上（属于历史遗留，不是本次改动引入）。
+  # version.sh 里 `version=$(cat <版本文件>)` 在最后一步覆盖 revision，
+  # 写对文件名就能压住它。**文件名随上游改过**：
+  #   FFmpeg <= 6.x  读 `VERSION`
+  #   FFmpeg >= 9.x  读 `FF_VERSION`（同一行，只换了文件名）
+  # 两个都写，一份脚本 6.x / 9.x 通吃；写错文件名不会有任何报错，只是静默失效。
   printf '%s\n' "$FFMPEG_VERSION" > "$FF_DIR/VERSION"
+  printf '%s\n' "$FFMPEG_VERSION" > "$FF_DIR/FF_VERSION"
 
   FF_ARGS=(
     "--prefix=$PREFIX"
@@ -304,6 +308,22 @@ build_ffmpeg() {
   }
 
   # ---------------- 防静默失败断言 ----------------
+  # 版本串：先确认 configure 真的从我们写的文件里读到了版本。
+  # 上游改过文件名（VERSION -> FF_VERSION），写错时**不报错**，
+  # 只是退回 git describe 去撞父目录的 .git，产物变成 commit sha 或 tag 名。
+  # 放在这里而不是等 smoke test：早 40 分钟暴露。
+  local vh="$FF_DIR/libavutil/ffversion.h"
+  if [ -f "$vh" ]; then
+    if ! grep -q "\"${FFMPEG_VERSION}\"" "$vh"; then
+      warn "----- $vh -----"
+      cat "$vh" >&2 || true
+      die "版本串没被压住：期望 ${FFMPEG_VERSION}，configure 读到的不是它（上游又改了版本文件名？）"
+    fi
+    ok "断言通过：产物版本串 = ${FFMPEG_VERSION}"
+  else
+    die "找不到 $vh —— configure 没有生成版本头"
+  fi
+
   # 这四项是本项目的存在理由，任何一个没开成，产物就没有意义
   assert_config CONFIG_LIBDAVS2_DECODER   "AVS2 解码 (libdavs2)"
   assert_config CONFIG_LIBUAVS3D_DECODER  "AVS3 解码 (libuavs3d)"
